@@ -7,6 +7,8 @@ from rich import print
 import argparse
 import fnmatch
 from pathlib import Path
+import shutil
+
 
 def is_binary_file(file_path, num_bytes=1024):
     try:
@@ -166,7 +168,7 @@ def usage():
     parser.add_argument('-c', '--case-sensitive', action = 'store_true', help = "Search with case sensitive pattern")
     parser.add_argument('-d', '--deep', help = 'How deep you want to search', action = 'store', type = int, default = 1)
     parser.add_argument('-p', '--path', help = f'Where you want to search to, default is {os.getcwd()}', default = Path.cwd().__str__(), action = 'store')
-    parser.add_argument('-D', '--dir', help = 'Search with directory too', action = 'store_true')
+    parser.add_argument('-D', '--no-dir', help = 'Search with directory too', action = 'store_false')
     parser.add_argument('-e', '--export', help = 'Export to [html,text,csv]', action = 'store')
     parser.add_argument('-f', '--file', help = 'find text inside file', action = 'store_true')
 
@@ -176,17 +178,26 @@ def usage():
         args = parser.parse_args()
         data = []
         if args.method == 1:
-            data = fast_find(args.path, args.SEARCH, args.deep, args.dir, args.case_sensitive, args.file)
+            data = fast_find(args.path, args.SEARCH, args.deep, args.no_dir, args.case_sensitive, args.file)
             
         elif args.method == 2:
-            data = find_with_depth(args.path, args.SEARCH, args.deep, args.dir, args.case_sensitive, args.file)
+            data = find_with_depth(args.path, args.SEARCH, args.deep, args.no_dir, args.case_sensitive, args.file)
         
         if data:
             print(f"\n[white on red]FOUNDS:[/] [black on #00FFFF]{len(data)}[/]\n")
             
             zfill = len(str(len(data)))
             for index, item in enumerate(data):
-                print(f"[bold #FFAAFF]{str(index + 1).zfill(zfill)}[/]. [bold #FFFF00]{item}[/]")
+                if args.file:
+                    print(f"[bold #FFAAFF]{str(index + 1).zfill(zfill)}[/]. [bold #FFFF00]{item[0]}[/]")
+                    for i in item[1:]:
+                        for x in i:
+                            # print(i)
+                            # print("-"*100)
+                            print(f"- [white on red]{x[0]}[/]. [bold red]{x[1]}[/]")
+                            # print("-"*shutil.get_terminal_size()[0])
+                else:
+                    print(f"[bold #FFAAFF]{str(index + 1).zfill(zfill)}[/]. [bold #FFFF00]{item}[/]")
 
 # Example usage
 # results = fast_find("/path/to/search", "mydir*", 2, include_dirs=False)
