@@ -1,14 +1,16 @@
 import os
+import signal
 import sys
 import ctraceback
 sys.excepthook = ctraceback.CTraceback
-
-from rich import print
+from ctraceback.custom_traceback import console
+# from rich import print
 import argparse
 import fnmatch
 from pathlib import Path
 import shutil
-
+from pydebugger.debug import debug
+from make_colors import make_colors
 
 def is_binary_file(file_path, num_bytes=1024):
     try:
@@ -23,7 +25,7 @@ def is_binary_file(file_path, num_bytes=1024):
             except UnicodeDecodeError:
                 return True
     except IOError:
-        print(f"[white on red blink]Could not read file:[/] [bold #FFFF00]{file_path}[/]")
+        console.print(f"[white on red blink]Could not read file:[/] [bold #FFFF00]{file_path}[/]")
         return True  # Treat unreadable files as binary for safety
 
 def open_file_safely(file_path):
@@ -31,12 +33,12 @@ def open_file_safely(file_path):
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 content = file.readlines()
-                # print("File content:", content)
+                # console.print("File content:", content)
                 return content
         except:
             pass
     # else:
-    #     print(f"[bold FF00FF]Skipping binary file:[/] [bold #FFFF00]{file_path}[/]")
+    #     console.print(f"[bold FF00FF]Skipping binary file:[/] [bold #FFFF00]{file_path}[/]")
 
     return ''
 
@@ -72,11 +74,11 @@ def fast_find(base_dir, pattern, max_depth, include_dirs=True, case_insensitive=
 
     matches = []
     is_wildcard = '*' in pattern or '?' in pattern
-    # print(f"is_wildcard: {is_wildcard}")
-    print(f"case_insensitive: {case_insensitive}")
+    # console.print(f"is_wildcard: {is_wildcard}")
+    console.print(f"case_insensitive: {case_insensitive}")
 
     if infile: include_dirs = False
-    print(f"include_dirs: {include_dirs}")
+    console.print(f"include_dirs: {include_dirs}")
     def search(current_dir, current_depth):
         if current_depth > max_depth:
             return
@@ -89,24 +91,23 @@ def fast_find(base_dir, pattern, max_depth, include_dirs=True, case_insensitive=
 
                 # Match based on wildcard or exact name
                 if is_wildcard:
-                    if fnmatch.fnmatch(entry_name, match_pattern):
-                        if include_dirs or entry.is_file():
-                            if infile:
-                                f = search_in_file(match_pattern.replace('*',''), entry.path)
-                                if f: matches.append([entry.path, f])
-                            else:        
-                                matches.append(entry.path)
+                    if fnmatch.fnmatch(entry_name, match_pattern) and (include_dirs or entry.is_file()):
+                        if infile:
+                            f = search_in_file(match_pattern.replace('*',''), entry.path)
+                            if f: matches.append([entry.path, f])
+                        else:        
+                            matches.append(entry.path)
                 else:
                     if entry_name == match_pattern or match_pattern in entry_name:
                         if include_dirs or entry.is_file():
                             matches.append(entry.path)
                     elif entry.is_file() and infile:
                         if ext and list(filter(lambda k: os.path.splitext(entry.path)[-1].lower() in k, ext)):
-                            # print(f"entry_name: {entry_name}")
+                            # console.print(f"entry_name: {entry_name}")
                             f = search_in_file(match_pattern.replace('*',''), entry.path)
                             if f: matches.append([entry.path, f])
                         else:
-                            # print(f"entry_name: {entry_name}")
+                            # console.print(f"entry_name: {entry_name}")
                             f = search_in_file(match_pattern.replace('*',''), entry.path)
                             if f: matches.append([entry.path, f])
                             
@@ -129,7 +130,7 @@ def find_with_depth(base_dir, pattern, max_depth, include_dirs=True, case_insens
     :return: List of matched paths.
     """
     if infile: include_dirs = False
-    print(f"include_dirs: {include_dirs}")
+    console.print(f"include_dirs: {include_dirs}")
     base = Path(base_dir)
     matches = []
     is_wildcard = '*' in pattern or '?' in pattern
@@ -142,23 +143,19 @@ def find_with_depth(base_dir, pattern, max_depth, include_dirs=True, case_insens
 
             # Match based on wildcard or exact name
             if is_wildcard:
-                if fnmatch.fnmatch(name_to_match, match_pattern):
-                    if include_dirs or p.is_file():
-                        if infile:
-                            f = search_in_file(match_pattern.replace('*',''), str(p.resolve()))
-                            matches.append([str(p.resolve())], f)
-                        else:        
-                            matches.append(p)
+                if fnmatch.fnmatch(name_to_match, match_pattern) and (include_dirs or p.is_file()):
+                    if infile:
+                        f = search_in_file(match_pattern.replace('*',''), str(p.resolve()))
+                        matches.append([str(p.resolve())], f)
+                    else:        
+                        matches.append(p)
             else:
-                if name_to_match == match_pattern or match_pattern in name_to_match:
-                    if include_dirs or p.is_file():
-                        if infile:
-                            f = search_in_file(pattern.replace('*',''), str(p.resolve()))
-                            if f: matches.append([str(p.resolve())], f)
-                        else:        
-                            matches.append(p.resolve())
-                    
-
+                if (name_to_match == match_pattern or match_pattern in name_to_match) and (include_dirs or p.is_file()):
+                    if infile:
+                        f = search_in_file(pattern.replace('*',''), str(p.resolve()))
+                        if f: matches.append([str(p.resolve())], f)
+                    else:        
+                        matches.append(p.resolve())                    
     return matches
 
 def usage():
@@ -184,24 +181,36 @@ def usage():
             data = find_with_depth(args.path, args.SEARCH, args.deep, args.no_dir, args.case_sensitive, args.file)
         
         if data:
-            print(f"\n[white on red]FOUNDS:[/] [black on #00FFFF]{len(data)}[/]\n")
+            console.print(f"\n[white on red]FOUNDS:[/] [black on #00FFFF]{len(data)}[/]\n")
             
             zfill = len(str(len(data)))
             for index, item in enumerate(data):
-                if args.file:
-                    print(f"[bold #FFAAFF]{str(index + 1).zfill(zfill)}[/]. [bold #FFFF00]{item[0]}[/]")
+                debug(index = index, item = item)
+                if args.file and isinstance(item, list or tuple):
+                    console.print(f"[bold #FFAAFF]{str(index + 1).zfill(zfill)}[/]. [bold #FFFF00]{item[0]}[/]")
                     for i in item[1:]:
                         for x in i:
-                            # print(i)
-                            # print("-"*100)
-                            print(f"- [white on red]{x[0]}[/]. [bold red]{x[1]}[/]")
-                            # print("-"*shutil.get_terminal_size()[0])
+                            debug(x = x)
+                            # console.print(i)
+                            # console.print("-"*100)
+                            # try:
+                            line = x[0]
+                            text = x[1]
+                            console.print(f"- [white on red]{line}[/]. [bold red]", end = '')
+                            print(f"{make_colors(text, 'lc')}")
+                            # except IndexError:
+                            #     debug(item = item)
+                            #     debug(item_1 = item[1:])
+                            #     debug(i = i)
+                            #     debug(x = x)
+                            #     os.kill(os.getpid(), signal.SIGTERM)
+                            # console.print("-"*shutil.get_terminal_size()[0])
                 else:
-                    print(f"[bold #FFAAFF]{str(index + 1).zfill(zfill)}[/]. [bold #FFFF00]{item}[/]")
+                    console.print(f"[bold #FFAAFF]{str(index + 1).zfill(zfill)}[/]. [bold #FFFF00]{item}[/]")
 
 # Example usage
 # results = fast_find("/path/to/search", "mydir*", 2, include_dirs=False)
-# print("Matched results:", results)
+# console.print("Matched results:", results)
 
 if __name__ == '__main__':
     usage()
