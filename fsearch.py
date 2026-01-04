@@ -53,11 +53,20 @@ if not tprint:
     def tprint(*args, **kwargs):
         traceback.print_exc(*args, **kwargs)
 
+console = None
+
 # import signal
 if HAS_CTRACEBACK:
     sys.excepthook = ctraceback.CTraceback  # type: ignore
     from ctraceback.custom_traceback import console
 # from rich import print
+try:
+    from rich.console import Console
+    HAS_RICH = True
+    console = console or Console()
+except:
+    HAS_RICH = False
+
 import argparse
 try:
     from licface import CustomRichHelpFormatter
@@ -67,7 +76,8 @@ except ImportError:
 import fnmatch
 from pathlib import Path
 # import shutil
-from make_colors import make_colors  # type: ignore
+from make_colors import make_colors, Console  # type: ignore
+console = console or Console()
 
 # Constants
 DEFAULT_CHECK_BYTES = 1024
@@ -147,7 +157,6 @@ def read_file_lines(file_path, max_line_length=MAX_LINE_LENGTH):
             logger.warning(f"Error reading file {file_path}: {e}")
         return []
 
-
 def search_in_file(pattern, file_path):
     """
     Search for pattern in file and return matching lines with line numbers.
@@ -171,10 +180,6 @@ def search_in_file(pattern, file_path):
             logger.error(f"Error searching in {file_path}: {e}")
         return []
 
-# # Example usage:
-# file_path = "example.txt"  # Replace with your file path
-# open_file_safely(file_path)
-
 def parse_include_patterns(include_pattern, case_insensitive=False):
     """
     Parse comma-separated include patterns.
@@ -195,7 +200,6 @@ def parse_include_patterns(include_pattern, case_insensitive=False):
     
     return patterns
 
-
 def matches_include_pattern(filename, include_patterns, case_insensitive=False):
     """
     Check if filename matches any include pattern.
@@ -214,10 +218,9 @@ def matches_include_pattern(filename, include_patterns, case_insensitive=False):
     fname = filename.lower() if case_insensitive else filename
     return any(fnmatch.fnmatch(fname, pattern) for pattern in include_patterns)
 
-
 def fast_find(base_dir, pattern, max_depth, include_dirs=True, 
               case_insensitive=False, search_in_files=False, 
-              include_pattern=''):
+              include_pattern='', verbose=False):
     """
     Fast search for files or directories matching a pattern.
     
@@ -254,13 +257,13 @@ def fast_find(base_dir, pattern, max_depth, include_dirs=True,
     matches = []
     is_wildcard = '*' in pattern or '?' in pattern
     # console.print(f"is_wildcard: {is_wildcard}")
-    console.print(f"case_insensitive: {case_insensitive}")
+    logger.debug(f"case_insensitive: {case_insensitive}")
     
     if search_in_files:
         include_dirs = False
-    console.print(f"include_dirs: {include_dirs}")
+    logger.debug(f"include_dirs: {include_dirs}")
     
-    def search(current_dir, current_depth):
+    def search(current_dir, current_depth, status = None):
         """Recursive search function"""
         if current_depth > max_depth:
             return
@@ -268,6 +271,8 @@ def fast_find(base_dir, pattern, max_depth, include_dirs=True,
         try:
             with os.scandir(current_dir) as entries:
                 for entry in entries:
+                    if status:
+                        status.update(f"[bold green]Searching in:[/] [bold #FFFF00]{entry.path}[/]")
                     try:
                         # Skip files not matching include pattern
                         if entry.is_file() and not matches_include_pattern(
@@ -320,9 +325,10 @@ def fast_find(base_dir, pattern, max_depth, include_dirs=True,
             if DEBUG_MODE:
                 logger.warning(f"Error accessing directory {current_dir}: {e}")
     
-    search(base_dir, 0)
+    if {HAS_RICH or HAS_CTRACEBACK} and verbose:
+        with console.status(f"[bold green]Searching in:[/] [bold #FFFF00]{base_dir}[/]", spinner="point") as status:  # type: ignore
+            search(base_dir, 0)
     return matches
-
 
 def find_with_depth(base_dir, pattern, max_depth, include_dirs=True, 
                     case_insensitive=True, search_in_files=False, 
@@ -351,7 +357,7 @@ def find_with_depth(base_dir, pattern, max_depth, include_dirs=True,
     
     if search_in_files:
         include_dirs = False
-    console.print(f"include_dirs: {include_dirs}")
+    logger.debug(f"include_dirs: {include_dirs}")
     
     # Parse include patterns
     include_patterns = parse_include_patterns(include_pattern, case_insensitive)
@@ -417,7 +423,6 @@ def find_with_depth(base_dir, pattern, max_depth, include_dirs=True,
     
     return matches
 
-
 def format_output(data, search_in_files=False):
     """
     Format and print search results.
@@ -450,6 +455,23 @@ def format_output(data, search_in_files=False):
             # Simple filepath
             console.print(f"[bold #FFAAFF]{str(index).zfill(zfill)}[/]. [bold #FFFF00]{item}[/]")
 
+def get_version():
+    try:
+        version_file = Path(__file__).parent / "__version__.py"
+        if version_file.is_file():
+            with open(version_file, "r") as f:
+                for line in f:
+                    if line.strip().startswith("version"):
+                        parts = line.split("=")
+                        if len(parts) == 2:
+                            return parts[1].strip().strip('"').strip("'")
+    except Exception as e:
+        if os.getenv('TRACEBACK') and os.getenv('TRACEBACK') in ['1', 'true', 'True']:
+            print(traceback.format_exc())
+        else:
+            print(f"ERROR: {e}")
+
+    return "1.0.0"
 
 def main():
     """Main entry point"""
@@ -478,12 +500,23 @@ def main():
                         help='Search for text inside files')
     parser.add_argument('-i', '--include', default='',
                         help='Only include files matching pattern (e.g., "*.py,*.txt")')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Enable verbose output')
+    parser.add_argument('-V', '--version', action='store_true',
+                        help='Show program version and exit')
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug mode')
     
     if len(sys.argv) == 1:
         parser.print_help()
         return 0
     
     args = parser.parse_args()
+
+    if args.version:
+        version = get_version()
+        console.print(f"[bold #00FFFF]fsearch version[/]: [bold #00FF00]{version}[/]")
+        return 0
     
     # Handle case sensitivity flags
     case_insensitive = args.case_insensitive and not args.case_sensitive
@@ -513,7 +546,8 @@ def main():
             include_dirs=not args.no_dir,
             case_insensitive=case_insensitive,
             search_in_files=args.file,
-            include_pattern=args.include
+            include_pattern=args.include,
+            verbose=args.verbose,  # type: ignore
         )
         
         # Display results
@@ -532,10 +566,6 @@ def main():
         if DEBUG_MODE:
             tprint(e)
         return 1
-
-# Example usage
-# results = fast_find("/path/to/search", "mydir*", 2, include_dirs=False)
-# console.print("Matched results:", results)
 
 if __name__ == '__main__':
     sys.exit(main())
